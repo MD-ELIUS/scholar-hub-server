@@ -35,6 +35,61 @@ async function run() {
 
      
 
+    // users related apis
+
+     app.post("/users", async (req, res) => {
+      const user = req.body ;
+      user.role = 'student' ;
+      user.createdAt = new Date() ;
+      const email = user.email ;
+      const userExists = await usersCollection.findOne({email}) ;
+
+      if(userExists) {
+        return res.send({ message: 'user already exist'})
+      }
+      const result = await usersCollection.insertOne(user) ;
+      res.send(result) ;
+    })
+
+
+    // Inside your run() function after defining usersCollection
+app.patch("/users/update/:email", async (req, res) => {
+  const email = req.params.email;
+  const { displayName, photoURL } = req.body;
+
+  try {
+    // Update only displayName and photoURL
+    const result = await usersCollection.findOneAndUpdate(
+      { email }, // filter by email
+      { $set: { displayName, photoURL } }, // only these fields
+      { returnDocument: "after" } // return updated document
+    );
+
+    if (!result.value) {
+      return res.status(404).send({ message: "User not found" });
+    }
+
+    res.send({ message: "Profile updated successfully", user: result.value });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Server error", error: err.message });
+  }
+});
+
+
+
+    // scholarship api
+    app.get('/scholarships', async (req, res) => {
+
+    })
+
+    app.post('/scholarships', async (req, res) => {
+        const scholarship = req.body;
+        const result = await scholarshipsCollection.insertOne(scholarship) ;
+        res.send(result)
+    })
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
