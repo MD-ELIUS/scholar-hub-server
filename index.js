@@ -175,6 +175,78 @@ app.get('/scholarships', async (req, res) => {
 
 
 
+// Update a scholarship by ID
+app.patch("/scholarships/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const updatedData = req.body;
+
+    // Only allow certain fields to be updated (security)
+    const allowedFields = [
+      "scholarshipName",
+      "universityName",
+      "country",
+      "city",
+      "worldRank",
+      "degree",
+      "subjectCategory",
+      "scholarshipCategory",
+      "tuitionFees",
+      "applicationFees",
+      "serviceCharge",
+      "totalAmount",
+      "deadline",
+      "image",
+      "postDate",
+      "userEmail",
+    ];
+
+    const updateFields = {};
+    allowedFields.forEach((field) => {
+      if (updatedData[field] !== undefined) {
+        updateFields[field] = updatedData[field];
+      }
+    });
+
+    const result = await scholarshipsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: updateFields }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Scholarship not found" });
+    }
+
+    res.send({ message: "Scholarship updated successfully", modifiedCount: result.modifiedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to update scholarship", error: err.message });
+  }
+});
+
+
+
+// Delete a scholarship by ID
+app.delete("/scholarships/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const result = await scholarshipsCollection.deleteOne({
+      _id: new ObjectId(id)
+    });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: "Scholarship not found" });
+    }
+
+    res.send({ message: "Scholarship deleted successfully", deletedCount: result.deletedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to delete scholarship", error: err.message });
+  }
+});
+
+
+
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
