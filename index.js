@@ -3,6 +3,7 @@ const cors = require('cors') ;
 const app = express() ;
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
 const port = process.env.PORT || 3000
 
@@ -32,6 +33,36 @@ async function run() {
     const db = client.db('scholar_hub_db')
      const usersCollection = db.collection('users') ;
     const scholarshipsCollection = db.collection('scholarships')
+    const applicationsCollection = db.collection('applications');
+    const reviewsCollection = db.collection('reviews');
+
+
+            const verifyAdmin = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user || user.role !== 'admin') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
+
+
+        
+          const verifyModerator = async (req, res, next) => {
+            const email = req.decoded_email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user || user.role !== 'moderator') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
+
 
      
 
@@ -80,7 +111,7 @@ app.get("/users", async (req, res) => {
     })
 
 
-    app.patch("/users/:id/role", async (req, res) => {
+    app.patch("/users/:id/role",  async (req, res) => {
   const id = req.params.id;
   const { role } = req.body;
   const result = await usersCollection.updateOne(
@@ -164,6 +195,36 @@ app.get('/scholarships', async (req, res) => {
 });
 
 
+// Get single scholarship by ID
+app.get("/scholarships/:id", async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // Validate ID
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid scholarship ID" });
+    }
+
+    const scholarship = await scholarshipsCollection.findOne({
+      _id: new ObjectId(id),
+    });
+
+    if (!scholarship) {
+      return res.status(404).send({ message: "Scholarship not found" });
+    }
+
+    res.send(scholarship);
+
+  } catch (err) {
+    res.status(500).send({
+      message: "Failed to fetch scholarship",
+      error: err.message,
+    });
+  }
+});
+
+
+
 
 
   app.post('/scholarships', async (req, res) => {
@@ -244,6 +305,338 @@ app.delete("/scholarships/:id", async (req, res) => {
     res.status(500).send({ message: "Failed to delete scholarship", error: err.message });
   }
 });
+
+// GET all applications (moderators/admins only)
+app.get("/applications/all", async (req, res) => {
+  try {
+    const search = req.query.search || "";
+
+    const searchConditions = [
+      { scholarshipName: { $regex: search, $options: "i" } },
+      { universityName: { $regex: search, $options: "i" } },
+      { degree: { $regex: search, $options: "i" } },
+      { userName: { $regex: search, $options: "i" } },
+      { userEmail: { $regex: search, $options: "i" } },
+    ];
+
+    const filter = search ? { $or: searchConditions } : {};
+
+    const applications = await applicationsCollection
+      .find(filter)
+      .sort({ applicationDate: -1 })
+      .toArray();
+
+    res.send(applications);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Failed to fetch applications", error: err.message });
+  }
+});
+
+
+
+// Get all applications for a student (My Applications)
+app.get("/applications", async (req, res) => {
+  try {
+    const userEmail = req.query.userEmail;
+    const search = req.query.search || "";
+
+    if (!userEmail) {
+      return res.status(400).send({ message: "Missing userEmail query parameter" });
+    }
+
+    // Search conditions for scholarshipName, universityName, degree
+    const searchConditions = [
+      { scholarshipName: { $regex: search, $options: "i" } },
+      { universityName: { $regex: search, $options: "i" } },
+      { degree: { $regex: search, $options: "i" } },
+    ];
+
+    const filter = {
+      userEmail,
+      $or: searchConditions,
+    };
+
+    // Fetch applications sorted by applicationDate descending
+    const applications = await applicationsCollection
+      .find(filter)
+      .sort({ applicationDate: -1 })
+      .toArray();
+
+    res.send(applications);
+  } catch (error) {
+    console.error("Failed to fetch applications:", error);
+    res.status(500).send({ message: "Failed to fetch applications", error: error.message });
+  }
+});
+
+
+
+// Check if user has already applied for a scholarship
+app.get('/applications/check', async (req, res) => {
+  try {
+    const { scholarshipId, userEmail } = req.query;
+
+    if (!scholarshipId || !userEmail) {
+      return res.status(400).send(null);
+    }
+
+    const application = await applicationsCollection.findOne({
+      scholarshipId,
+      userEmail
+    });
+
+    // returns null if no application exists
+    res.send(application || null);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send(null);
+  }
+});
+
+
+
+app.post('/applications', async (req, res) => {
+  try {
+    const application = req.body;
+
+    const { scholarshipId, userEmail } = application;
+
+    // 🔍 Step 1: check existing application
+    const existingApplication = await applicationsCollection.findOne({
+      scholarshipId,
+      userEmail
+
+    });
+
+    if (existingApplication) {
+      return res.status(409).send({
+        message: 'You already applied for this scholarship'
+      });
+    }
+
+    // 🔹 Step 2: default fields
+    application.applicationStatus = 'pending';
+    application.paymentStatus = 'unpaid';
+    application.applicationDate = new Date();
+
+    // 🔹 Step 3: insert application
+    const result = await applicationsCollection.insertOne(application);
+
+    res.send({
+      message: 'Application submitted successfully',
+      insertedId: result.insertedId
+    });
+
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Failed to apply scholarship' });
+  }
+});
+
+
+// Update application status
+app.patch("/applications/:id/status",  async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!status) {
+      return res.status(400).send({ message: "Status is required" });
+    }
+
+    const result = await applicationsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          applicationStatus: status,
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Application not found" });
+    }
+
+    res.send({
+      success: true,
+      message: "Application status updated successfully",
+    });
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to update application status",
+    });
+  }
+});
+
+
+// Update application feedback (Moderator/Admin)
+app.patch("/applications/:id/feedback", async (req, res) => {
+  try {
+    const id = req.params.id;
+    const { feedback } = req.body;
+
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: "Invalid application ID" });
+    }
+
+    if (!feedback) {
+      return res.status(400).send({ message: "Feedback is required" });
+    }
+
+    const result = await applicationsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          feedback: feedback,
+        },
+      }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Application not found" });
+    }
+
+    res.send({
+      success: true,
+      message: "Feedback submitted successfully",
+    });
+  } catch (error) {
+    console.error("Feedback update error:", error);
+    res.status(500).send({
+      success: false,
+      message: "Failed to submit feedback",
+      error: error.message,
+    });
+  }
+});
+
+
+
+// DELETE an application by ID
+app.delete('/applications/:id', async (req, res) => {
+  try {
+    const id = req.params.id;
+
+    // Validate ID
+    if (!ObjectId.isValid(id)) {
+      return res.status(400).send({ message: 'Invalid application ID' });
+    }
+
+    const result = await applicationsCollection.deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: 'Application not found' });
+    }
+
+    res.send({
+      message: 'Application deleted successfully',
+      deletedCount: result.deletedCount
+    });
+  } catch (error) {
+    console.error('Failed to delete application:', error);
+    res.status(500).send({ message: 'Failed to delete application', error: error.message });
+  }
+});
+
+
+app.post('/create-checkout-session', async (req, res) => {
+  try {
+    const { scholarshipId, userEmail, userName } = req.body;
+
+    if (!scholarshipId || !userEmail) {
+      return res.status(400).send({ message: 'Missing scholarshipId or userEmail' });
+    }
+
+    const scholarship = await scholarshipsCollection.findOne({
+      _id: new ObjectId(scholarshipId)
+    });
+
+    if (!scholarship) {
+      return res.status(404).send({ message: 'Scholarship not found' });
+    }
+
+    // Ensure fees are numbers
+    const applicationFees = Number(scholarship.applicationFees || 0);
+    const serviceCharge = Number(scholarship.serviceCharge || 0);
+    const totalAmount = applicationFees + serviceCharge;
+
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      line_items: [{
+        price_data: {
+          currency: 'usd',
+          unit_amount: totalAmount * 100, // Stripe expects amount in cents
+          product_data: {
+            name: scholarship.scholarshipName
+          }
+        },
+        quantity: 1
+      }],
+      mode: 'payment',
+      metadata: {
+        scholarshipId,
+        userEmail
+      },
+      success_url: `${process.env.SITE_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${process.env.SITE_URL}/payment-cancelled`
+    });
+
+    // Create unpaid application immediately if not exists
+    const existingApplication = await applicationsCollection.findOne({
+      scholarshipId,
+      userEmail
+    });
+
+    if (!existingApplication) {
+      const application = {
+        scholarshipId,
+        userEmail,
+        userName,
+        scholarshipName: scholarship.scholarshipName,
+        universityName: scholarship.universityName,
+        scholarshipCategory: scholarship.scholarshipCategory,
+        degree: scholarship.degree,
+        applicationFees: applicationFees,
+        serviceCharge: serviceCharge,
+        applicationStatus: 'pending',
+        paymentStatus: 'unpaid',  // initially unpaid
+        applicationDate: new Date()
+      };
+      await applicationsCollection.insertOne(application);
+    }
+
+    res.send({ url: session.url });
+  } catch (error) {
+    console.error('Stripe checkout session error:', error);
+    res.status(500).send({ message: 'Failed to create checkout session', error: error.message });
+  }
+});
+
+
+app.post('/payment-success', async (req, res) => {
+  const { sessionId } = req.body;
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+  if (session.payment_status !== 'paid') {
+    return res.status(400).send({ message: 'Payment not successful' });
+  }
+
+  const { scholarshipId, userEmail } = session.metadata;
+
+  const result = await applicationsCollection.updateOne(
+    { scholarshipId, userEmail },
+    { $set: { paymentStatus: 'paid' } }
+  );
+
+  res.send({
+    success: true,
+    message: 'Payment confirmed, application updated to paid'
+  });
+});
+
 
 
 
