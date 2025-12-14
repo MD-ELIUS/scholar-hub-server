@@ -541,6 +541,182 @@ app.delete('/applications/:id', async (req, res) => {
   }
 });
 
+// GET all reviews of a user
+app.get("/reviews", async (req, res) => {
+  const { userEmail } = req.query;
+
+  if (!userEmail) {
+    return res.status(400).send([]);
+  }
+
+  const reviews = await reviewsCollection
+    .find({ userEmail })
+    .toArray();
+
+  res.send(reviews);
+});
+
+// GET all reviews (Admin / Moderator)
+// GET all reviews (Admin / Moderator)
+app.get("/reviews/all", async (req, res) => {
+  try {
+    const search = req.query.search || "";
+
+    const searchConditions = [
+      { userName: { $regex: search, $options: "i" } },
+      { userEmail: { $regex: search, $options: "i" } },
+      { scholarshipName: { $regex: search, $options: "i" } }, // ✅ ADD THIS
+      { universityName: { $regex: search, $options: "i" } },
+      { reviewComment: { $regex: search, $options: "i" } },
+    ];
+
+    const filter = search ? { $or: searchConditions } : {};
+
+    const reviews = await reviewsCollection
+      .find(filter)
+      .sort({ reviewDate: -1 })
+      .toArray();
+
+    res.send(reviews);
+  } catch (err) {
+    res.status(500).send({
+      message: "Failed to fetch reviews",
+      error: err.message,
+    });
+  }
+});
+
+
+
+app.delete("/reviews/:id", async (req, res) => {
+  const reviewId = req.params.id;
+
+  if (!ObjectId.isValid(reviewId)) {
+    return res.status(400).send({ message: "Invalid review ID" });
+  }
+
+  const result = await reviewsCollection.deleteOne({
+    _id: new ObjectId(reviewId)
+  });
+
+  if (result.deletedCount === 0) {
+    return res.status(404).send({ message: "Review not found" });
+  }
+
+  res.send({ message: "Review deleted successfully" });
+});
+
+
+
+
+// Submit a review for an application
+app.post('/applications/:id/review', async (req, res) => {
+  try {
+    const appId = req.params.id;
+    const { rating, comment } = req.body;
+
+    const application = await applicationsCollection.findOne({
+      _id: new ObjectId(appId)
+    });
+
+    if (!application) {
+      return res.status(404).send({ message: 'Application not found' });
+    }
+
+    const { scholarshipId, userEmail, universityName, scholarshipName } = application;
+
+    // ❌ duplicate review check
+    const existingReview = await reviewsCollection.findOne({
+      scholarshipId,
+      userEmail
+    });
+
+    if (existingReview) {
+      return res.status(409).send({
+        message: 'You already submitted a review for this scholarship'
+      });
+    }
+
+    // ✅ GET USER DATA FROM users collection
+    const user = await usersCollection.findOne({ email: userEmail });
+
+    const review = {
+      scholarshipId,
+      scholarshipName,
+      universityName,
+      userEmail,
+      userName: user?.displayName || "Anonymous",
+      userImage: user?.photoURL || null,
+      ratingPoint: rating,
+      reviewComment: comment,
+      reviewDate: new Date()
+    };
+
+    await reviewsCollection.insertOne(review);
+
+    res.status(201).send({ message: 'Review submitted successfully' });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({
+      message: 'Failed to submit review',
+      error: err.message
+    });
+  }
+});
+
+// Update a review
+app.put("/reviews/:id", async (req, res) => {
+  try {
+    const reviewId = req.params.id;
+    const { ratingPoint, reviewComment } = req.body;
+
+    if (!ObjectId.isValid(reviewId)) {
+      return res.status(400).send({ message: "Invalid review ID" });
+    }
+
+    const updatedReview = {
+      ratingPoint,
+      reviewComment,
+      reviewDate: new Date() // update review date
+    };
+
+    const result = await reviewsCollection.updateOne(
+      { _id: new ObjectId(reviewId) },
+      { $set: updatedReview }
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).send({ message: "Review not found" });
+    }
+
+    res.status(200).send({ message: "Review updated successfully" });
+  } catch (err) {
+    res.status(500).send({ message: "Failed to update review", error: err.message });
+  }
+});
+
+// Delete a review
+app.delete("/reviews/:id", async (req, res) => {
+  try {
+    const reviewId = req.params.id;
+
+    if (!ObjectId.isValid(reviewId)) {
+      return res.status(400).send({ message: "Invalid review ID" });
+    }
+
+    const result = await reviewsCollection.deleteOne({ _id: new ObjectId(reviewId) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).send({ message: "Review not found" });
+    }
+
+    res.status(200).send({ message: "Review deleted successfully" });
+  } catch (err) {
+    res.status(500).send({ message: "Failed to delete review", error: err.message });
+  }
+});
+
 
 app.post('/create-checkout-session', async (req, res) => {
   try {
