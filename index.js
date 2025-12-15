@@ -2,6 +2,7 @@ const express = require('express')
 const cors = require('cors') ;
 const app = express() ;
 require('dotenv').config();
+const jwt = require('jsonwebtoken');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
@@ -35,6 +36,15 @@ async function run() {
     const scholarshipsCollection = db.collection('scholarships')
     const applicationsCollection = db.collection('applications');
     const reviewsCollection = db.collection('reviews');
+
+
+    //JWT Related APIs
+      app.post('/getToken', (req, res) => {
+        const loggedUser = req.body ;
+        const token = jwt.sign(loggedUser, process.env.JWT_SECRET, {expiresIn: '1h'})
+        console.log(token)
+        res.send({token: token})
+    })
 
 
             const verifyAdmin = async (req, res, next) => {
