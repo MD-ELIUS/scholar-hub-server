@@ -90,7 +90,17 @@ async function run() {
 
 
 
-        
+                 const verifyModerator = async (req, res, next) => {
+            const email = req.decoded.email;
+            const query = { email };
+            const user = await usersCollection.findOne(query);
+
+            if (!user || user.role !== 'moderator') {
+                return res.status(403).send({ message: 'forbidden access' });
+            }
+
+            next();
+        }
  
 
 
