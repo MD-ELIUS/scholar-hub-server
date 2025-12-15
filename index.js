@@ -32,6 +32,7 @@ const verifyJWTToken = (req, res, next) => {
         if(err) {
             return res.status(401).send({message: 'unauthorized access' })
         }
+         req.decoded = decoded; // ✅ whole decoded object
         //   console.log('after decoded', decoded)
            req.token_email = decoded.email
          next()
@@ -73,9 +74,10 @@ async function run() {
         res.send({token: token})
     })
 
-
-            const verifyAdmin = async (req, res, next) => {
-            const email = req.decoded_email;
+     // middle admin before allowing admin activity
+        // must be used after verifyFBToken middleware
+        const verifyAdmin = async (req, res, next) => {
+           const email = req.decoded.email;
             const query = { email };
             const user = await usersCollection.findOne(query);
 
@@ -87,18 +89,9 @@ async function run() {
         }
 
 
+
         
-          const verifyModerator = async (req, res, next) => {
-            const email = req.decoded_email;
-            const query = { email };
-            const user = await usersCollection.findOne(query);
-
-            if (!user || user.role !== 'moderator') {
-                return res.status(403).send({ message: 'forbidden access' });
-            }
-
-            next();
-        }
+ 
 
 
      
@@ -148,7 +141,7 @@ app.get("/users", verifyJWTToken, async (req, res) => {
     })
 
 
-    app.patch("/users/:id/role", verifyJWTToken,  async (req, res) => {
+    app.patch("/users/:id/role", verifyJWTToken, verifyAdmin, async (req, res) => {
   const id = req.params.id;
   const { role } = req.body;
   const result = await usersCollection.updateOne(
