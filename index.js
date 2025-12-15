@@ -13,6 +13,33 @@ const port = process.env.PORT || 3000
 app.use(express.json()) ;
 app.use(cors()) ;
 
+//JWT MIDDLEWARE
+
+const verifyJWTToken = (req, res, next) => {
+    //  console.log('in middleware', req.headers) ;
+      if(!req.headers.authorization) {
+        //do not allow to go
+        return res.status(401).send({message: 'unauthorized access'})
+    }
+
+    const token = req.headers.authorization.split(' ')[1]
+
+    if(!token) {
+        return res.status(401).send({message: 'unauthorized access' })
+    }
+
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if(err) {
+            return res.status(401).send({message: 'unauthorized access' })
+        }
+        //   console.log('after decoded', decoded)
+           req.token_email = decoded.email
+         next()
+    })
+
+    
+}
+
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.vm94rma.mongodb.net/?appName=Cluster0`;
 
@@ -79,7 +106,7 @@ async function run() {
     // users related apis
 
     // Get all users
-app.get("/users", async (req, res) => {
+app.get("/users", verifyJWTToken, async (req, res) => {
   const search = req.query.search || "";
   const role = req.query.role || "";
 
@@ -97,7 +124,7 @@ app.get("/users", async (req, res) => {
 });
 
 
-       app.get('/users/:email/role', async (req, res) => {
+       app.get('/users/:email/role', verifyJWTToken, async (req, res) => {
             const email = req.params.email;
             const query = { email }
             const user = await usersCollection.findOne(query);
@@ -106,7 +133,7 @@ app.get("/users", async (req, res) => {
 
 
 
-     app.post("/users", async (req, res) => {
+     app.post("/users",  async (req, res) => {
       const user = req.body ;
       user.role = 'student' ;
       user.createdAt = new Date() ;
@@ -121,7 +148,7 @@ app.get("/users", async (req, res) => {
     })
 
 
-    app.patch("/users/:id/role",  async (req, res) => {
+    app.patch("/users/:id/role", verifyJWTToken,  async (req, res) => {
   const id = req.params.id;
   const { role } = req.body;
   const result = await usersCollection.updateOne(
@@ -131,7 +158,7 @@ app.get("/users", async (req, res) => {
   res.send(result);
 });
 
-app.delete("/users/:id", async (req, res) => {
+app.delete("/users/:id", verifyJWTToken, async (req, res) => {
   const result = await usersCollection.deleteOne({
     _id: new ObjectId(req.params.id)
   });
@@ -141,7 +168,7 @@ app.delete("/users/:id", async (req, res) => {
 
 
     // Inside your run() function after defining usersCollection
-app.patch("/users/update/:email", async (req, res) => {
+app.patch("/users/update/:email", verifyJWTToken, async (req, res) => {
   const email = req.params.email;
   const { displayName, photoURL } = req.body;
 
@@ -167,7 +194,7 @@ app.patch("/users/update/:email", async (req, res) => {
 
 
     // scholarship api
-app.get('/scholarships', async (req, res) => {
+app.get('/scholarships',  async (req, res) => {
   try {
     const { search = "", scholarshipCategory, subjectCategory, country } = req.query;
 
