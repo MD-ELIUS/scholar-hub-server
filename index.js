@@ -88,7 +88,7 @@ async function run() {
             next();
         }
 
-
+     // Verify Moderator only
 
                  const verifyModerator = async (req, res, next) => {
             const email = req.decoded.email;
@@ -102,6 +102,21 @@ async function run() {
             next();
         }
  
+
+        // Verify Admin or Moderator
+        
+        const verifyAdminOrModerator = async (req, res, next) => {
+  const email = req.decoded.email;
+
+  const user = await usersCollection.findOne({ email });
+
+  if (!user || (user.role !== "admin" && user.role !== "moderator")) {
+    return res.status(403).send({ message: "forbidden access" });
+  }
+
+  next();
+};
+
 
 
      
@@ -347,7 +362,7 @@ app.delete("/scholarships/:id", async (req, res) => {
 });
 
 // GET all applications (moderators/admins only)
-app.get("/applications/all", async (req, res) => {
+app.get("/applications/all", verifyJWTToken,  verifyAdminOrModerator, async (req, res) => {
   try {
     const search = req.query.search || "";
 
@@ -436,7 +451,7 @@ app.get('/applications/check', async (req, res) => {
 
 
 
-app.post('/applications', async (req, res) => {
+app.post('/applications',  async (req, res) => {
   try {
     const application = req.body;
 
@@ -476,7 +491,7 @@ app.post('/applications', async (req, res) => {
 
 
 // Update application status
-app.patch("/applications/:id/status",  async (req, res) => {
+app.patch("/applications/:id/status", verifyJWTToken, verifyModerator,  async (req, res) => {
   try {
     const { id } = req.params;
     const { status } = req.body;
@@ -513,7 +528,7 @@ app.patch("/applications/:id/status",  async (req, res) => {
 
 
 // Update application feedback (Moderator/Admin)
-app.patch("/applications/:id/feedback", async (req, res) => {
+app.patch("/applications/:id/feedback", verifyJWTToken, verifyModerator, async (req, res) => {
   try {
     const id = req.params.id;
     const { feedback } = req.body;
@@ -756,6 +771,67 @@ app.delete("/reviews/:id", async (req, res) => {
     res.status(500).send({ message: "Failed to delete review", error: err.message });
   }
 });
+
+
+// Admin Analytics API
+app.get(
+  "/admin/analytics",
+  verifyJWTToken,
+  verifyAdmin,
+  async (req, res) => {
+    try {
+      const totalUsers = await usersCollection.countDocuments();
+      const totalScholarships = await scholarshipsCollection.countDocuments();
+
+      // Total Fees Collected
+      const paidApps = await applicationsCollection
+        .find({ paymentStatus: "paid" })
+        .toArray();
+
+      const totalFeesCollected = paidApps.reduce(
+        (sum, app) =>
+          sum +
+          Number(app.applicationFees || 0) +
+          Number(app.serviceCharge || 0),
+        0
+      );
+
+      // Applications per scholarship category
+      const categoryAggregation = await applicationsCollection
+        .aggregate([
+          {
+            $group: {
+              _id: "$scholarshipCategory",
+              count: { $sum: 1 },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              category: { $ifNull: ["$_id", "Unknown"] },
+              applications: "$count",
+            },
+          },
+        ])
+        .toArray();
+
+      res.send({
+        totalUsers,
+        totalScholarships,
+        totalFeesCollected,
+        applicationsByCategory: categoryAggregation,
+      });
+    } catch (error) {
+      res.status(500).send({
+        message: "Failed to load admin analytics",
+        error: error.message,
+      });
+    }
+  }
+);
+
+
+
 
 
 app.post('/create-checkout-session', async (req, res) => {
