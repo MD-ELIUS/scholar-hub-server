@@ -313,6 +313,7 @@ app.patch("/scholarships/:id", async (req, res) => {
       "totalAmount",
       "deadline",
       "image",
+      "description",
       "postDate",
       "userEmail",
     ];
@@ -838,6 +839,8 @@ app.post('/create-checkout-session', async (req, res) => {
   try {
     const { scholarshipId, userEmail, userName } = req.body;
 
+  console.log(scholarshipId, userEmail, userName)
+
     if (!scholarshipId || !userEmail) {
       return res.status(400).send({ message: 'Missing scholarshipId or userEmail' });
     }
@@ -870,6 +873,7 @@ app.post('/create-checkout-session', async (req, res) => {
       mode: 'payment',
       metadata: {
         scholarshipId,
+        userName,
         userEmail
       },
       success_url: `${process.env.SITE_URL}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -911,23 +915,55 @@ app.post('/create-checkout-session', async (req, res) => {
 app.post('/payment-success', async (req, res) => {
   const { sessionId } = req.body;
   const session = await stripe.checkout.sessions.retrieve(sessionId);
+  console.log(session)
 
   if (session.payment_status !== 'paid') {
     return res.status(400).send({ message: 'Payment not successful' });
   }
 
-  const { scholarshipId, userEmail } = session.metadata;
+  const { scholarshipId, userEmail, userName } = session.metadata;
 
   const result = await applicationsCollection.updateOne(
     { scholarshipId, userEmail },
     { $set: { paymentStatus: 'paid' } }
   );
 
+  // ✅ metadata frontend এ পাঠানো হচ্ছে
   res.send({
     success: true,
-    message: 'Payment confirmed, application updated to paid'
+    message: 'Payment confirmed',
+    metadata: {
+      scholarshipId,
+      userEmail,
+      userName
+    }
   });
 });
+
+
+// GET /payment-cancelled-info?userEmail=xxx
+app.get('/payment-cancelled-info', async (req, res) => {
+  const { userEmail } = req.query;
+
+  if (!userEmail) return res.status(400).send({ message: 'Missing userEmail' });
+
+  // latest unpaid application
+  const application = await applicationsCollection.findOne(
+    { userEmail, paymentStatus: 'unpaid' },
+    { sort: { applicationDate: -1 } } // latest first
+  );
+
+  if (!application) {
+    return res.status(404).send({ message: 'No unpaid application found' });
+  }
+
+  res.send({
+    scholarshipId: application.scholarshipId,
+    scholarshipName: application.scholarshipName,
+    message: 'Payment was cancelled'
+  });
+});
+
 
 
 
